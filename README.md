@@ -61,6 +61,23 @@ npx -y --package github:formonkey/jira-issue-context-mcp#main jira-issue-login \
 
 Run it from your project root. The login helper writes `JIRA_SESSION_TOKEN` to `.env` in the current directory and uses a persistent Playwright profile at `.auth/browser-profile` by default. `--browser-channel=msedge` uses your installed Edge instead of downloading Playwright's Chromium. You may need to complete SSO/MFA manually the first time; later runs reuse the browser session while it remains valid.
 
+If Microsoft SSO blocks the automated browser, start Edge yourself with remote debugging and let the helper connect to that real Edge session:
+
+```powershell
+start msedge --remote-debugging-port=9222
+```
+
+Then run:
+
+```bash
+npx -y --package github:formonkey/jira-issue-context-mcp#main jira-issue-login \
+  --base-url=https://your-domain.atlassian.net \
+  --cookie-name=tenant.session.token \
+  --cdp-url=http://127.0.0.1:9222
+```
+
+This mode is useful for corporate SSO because you sign in through your normal Edge profile instead of a Playwright-managed profile.
+
 ## Codex Project Config
 
 Example `.codex/config.toml`:

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, isAbsolute, resolve } from "path";
 import { fileURLToPath } from "url";
 import { chromium } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -59,25 +60,47 @@ function resolveProfileDir(): string {
   return isAbsolute(configured) ? configured : resolve(WORK_DIR, configured);
 }
 
-export async function interactiveLogin(): Promise<string> {
-  const jiraBaseUrl = getArgValue("base-url") || readEnvValue("JIRA_BASE_URL");
-  if (!jiraBaseUrl) {
-    throw new Error("Set JIRA_BASE_URL before running the login helper.");
-  }
-  const cookieName = getArgValue("cookie-name") || readEnvValue("JIRA_COOKIE_NAME") || "tenant.session.token";
-  const browserChannel = getArgValue("browser-channel") || readEnvValue("JIRA_BROWSER_CHANNEL");
-  const profileDir = resolveProfileDir();
+type LoginSession = {
+  context: BrowserContext;
+  page: Page;
+  cleanup: () => Promise<void>;
+};
 
-  console.log("Jira Issue MCP - interactive login");
-  console.log(`Opening ${jiraBaseUrl}`);
+async function openLoginSession(browserChannel?: string): Promise<LoginSession> {
+  const cdpUrl = getArgValue("cdp-url") || readEnvValue("JIRA_CDP_URL");
+
+  if (cdpUrl) {
+    console.log(`Connecting to existing browser over CDP: ${cdpUrl}`);
+
+    let browser: Browser;
+    try {
+      browser = await chromium.connectOverCDP(cdpUrl);
+    } catch (error) {
+      throw new Error(
+        `Could not connect to Edge at ${cdpUrl}. Start Edge with --remote-debugging-port first. ${
+          (error as Error).message
+        }`
+      );
+    }
+
+    const context = browser.contexts()[0] ?? (await browser.newContext());
+    const page = await context.newPage();
+    await page.bringToFront().catch(() => undefined);
+
+    return {
+      context,
+      page,
+      cleanup: async () => {
+        await browser.close().catch(() => undefined);
+      },
+    };
+  }
+
+  const profileDir = resolveProfileDir();
   console.log(`Using persistent browser profile: ${profileDir}`);
   if (browserChannel) {
     console.log(`Using installed browser channel: ${browserChannel}`);
   }
-  console.log(`Writing token to: ${ENV_PATH}`);
-  console.log(
-    `Complete SSO in the browser window if required. The ${cookieName} cookie will be saved to .env.`
-  );
 
   mkdirSync(profileDir, { recursive: true });
 
@@ -91,53 +114,81 @@ export async function interactiveLogin(): Promise<string> {
   });
 
   const page = await context.newPage();
-  await page.goto(jiraBaseUrl, { waitUntil: "domcontentloaded" });
+
+  return {
+    context,
+    page,
+    cleanup: async () => {
+      await context.close().catch(() => undefined);
+    },
+  };
+}
+
+export async function interactiveLogin(): Promise<string> {
+  const jiraBaseUrl = getArgValue("base-url") || readEnvValue("JIRA_BASE_URL");
+  if (!jiraBaseUrl) {
+    throw new Error("Set JIRA_BASE_URL before running the login helper.");
+  }
+  const cookieName = getArgValue("cookie-name") || readEnvValue("JIRA_COOKIE_NAME") || "tenant.session.token";
+  const browserChannel = getArgValue("browser-channel") || readEnvValue("JIRA_BROWSER_CHANNEL");
+
+  console.log("Jira Issue MCP - interactive login");
+  console.log(`Opening ${jiraBaseUrl}`);
+  console.log(`Writing token to: ${ENV_PATH}`);
+  console.log(
+    `Complete SSO in the browser window if required. The ${cookieName} cookie will be saved to .env.`
+  );
+
+  const { context, page, cleanup } = await openLoginSession(browserChannel);
 
   const maxWaitMs = 5 * 60 * 1000;
   const pollIntervalMs = 2000;
   let elapsed = 0;
   let token: string | undefined;
-
-  while (elapsed < maxWaitMs) {
-    const cookies = await context.cookies();
-    token = cookies.find((cookie) => cookie.name === cookieName)?.value;
-    if (token) break;
-
-    await page.waitForTimeout(pollIntervalMs);
-    elapsed += pollIntervalMs;
-  }
-
-  if (!token) {
-    await context.close();
-    throw new Error("Could not capture tenant.session.token after 5 minutes.");
-  }
-
-  console.log("Token captured. Verifying Jira REST API access...");
-  await page.goto(`${jiraBaseUrl}/rest/api/3/myself`, { waitUntil: "domcontentloaded" });
-
-  elapsed = 0;
   let verified = false;
-  while (elapsed < maxWaitMs) {
-    const body = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    if (body.trim().startsWith("{")) {
-      JSON.parse(body);
-      verified = true;
-      break;
+
+  try {
+    await page.goto(jiraBaseUrl, { waitUntil: "domcontentloaded" });
+
+    while (elapsed < maxWaitMs) {
+      const cookies = await context.cookies();
+      token = cookies.find((cookie) => cookie.name === cookieName)?.value;
+      if (token) break;
+
+      await page.waitForTimeout(pollIntervalMs);
+      elapsed += pollIntervalMs;
     }
 
-    const url = page.url();
-    if (url.includes("id.atlassian.com") || url.includes("step-up") || url.includes("login")) {
-      console.log("Additional verification required. Complete it in the browser window...");
+    if (!token) {
+      throw new Error(`Could not capture ${cookieName} after 5 minutes.`);
     }
 
-    await page.waitForTimeout(pollIntervalMs);
-    elapsed += pollIntervalMs;
+    console.log("Token captured. Verifying Jira REST API access...");
+    await page.goto(`${jiraBaseUrl}/rest/api/3/myself`, { waitUntil: "domcontentloaded" });
+
+    elapsed = 0;
+    while (elapsed < maxWaitMs) {
+      const body = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+      if (body.trim().startsWith("{")) {
+        JSON.parse(body);
+        verified = true;
+        break;
+      }
+
+      const url = page.url();
+      if (url.includes("id.atlassian.com") || url.includes("step-up") || url.includes("login")) {
+        console.log("Additional verification required. Complete it in the browser window...");
+      }
+
+      await page.waitForTimeout(pollIntervalMs);
+      elapsed += pollIntervalMs;
+    }
+
+    const finalCookies = await context.cookies();
+    token = finalCookies.find((cookie) => cookie.name === cookieName)?.value || token;
+  } finally {
+    await cleanup();
   }
-
-  const finalCookies = await context.cookies();
-  token = finalCookies.find((cookie) => cookie.name === cookieName)?.value || token;
-
-  await context.close();
 
   if (!verified) {
     throw new Error("Token captured, but Jira REST API access could not be verified.");
