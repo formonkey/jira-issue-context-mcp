@@ -5,8 +5,10 @@ import { chromium } from "playwright";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const PROJECT_ROOT = resolve(__dirname, "..");
-const ENV_PATH = resolve(PROJECT_ROOT, ".env");
+const PACKAGE_ROOT = resolve(__dirname, "..");
+const WORK_DIR = process.cwd();
+const ENV_PATH = resolve(WORK_DIR, ".env");
+const PACKAGE_ENV_PATH = resolve(PACKAGE_ROOT, ".env");
 
 function getArgValue(name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -17,13 +19,17 @@ function readEnvValue(name: string): string | undefined {
   const value = process.env[name];
   if (value) return value;
 
-  try {
-    const content = readFileSync(ENV_PATH, "utf-8");
-    const match = content.match(new RegExp(`^${name}=(.*)$`, "m"));
-    return match?.[1]?.trim();
-  } catch {
-    return undefined;
+  for (const envPath of [ENV_PATH, PACKAGE_ENV_PATH]) {
+    try {
+      const content = readFileSync(envPath, "utf-8");
+      const match = content.match(new RegExp(`^${name}=(.*)$`, "m"));
+      if (match?.[1]?.trim()) return match[1].trim();
+    } catch {
+      // Try the next location.
+    }
   }
+
+  return undefined;
 }
 
 function updateEnvValue(name: string, value: string): void {
@@ -50,7 +56,7 @@ function resolveProfileDir(): string {
     readEnvValue("JIRA_BROWSER_PROFILE_DIR") ||
     ".auth/browser-profile";
 
-  return isAbsolute(configured) ? configured : resolve(PROJECT_ROOT, configured);
+  return isAbsolute(configured) ? configured : resolve(WORK_DIR, configured);
 }
 
 export async function interactiveLogin(): Promise<string> {
@@ -64,6 +70,7 @@ export async function interactiveLogin(): Promise<string> {
   console.log("Jira Issue MCP - interactive login");
   console.log(`Opening ${jiraBaseUrl}`);
   console.log(`Using persistent browser profile: ${profileDir}`);
+  console.log(`Writing token to: ${ENV_PATH}`);
   console.log(
     `Complete SSO in the browser window if required. The ${cookieName} cookie will be saved to .env.`
   );
