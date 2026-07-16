@@ -60,11 +60,11 @@ function resolveProfileDir(): string {
 }
 
 export async function interactiveLogin(): Promise<string> {
-  const jiraBaseUrl = readEnvValue("JIRA_BASE_URL");
+  const jiraBaseUrl = getArgValue("base-url") || readEnvValue("JIRA_BASE_URL");
   if (!jiraBaseUrl) {
     throw new Error("Set JIRA_BASE_URL before running the login helper.");
   }
-  const cookieName = readEnvValue("JIRA_COOKIE_NAME") || "tenant.session.token";
+  const cookieName = getArgValue("cookie-name") || readEnvValue("JIRA_COOKIE_NAME") || "tenant.session.token";
   const profileDir = resolveProfileDir();
 
   console.log("Jira Issue MCP - interactive login");
