@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { platform } from "os";
 import { dirname, isAbsolute, resolve } from "path";
@@ -142,6 +142,25 @@ function resolveBrowserCommand(browserName: string): string {
   return browserName;
 }
 
+function closeExistingBrowser(browserName: string): void {
+  if (platform() !== "win32") {
+    console.log("Automatic browser close is only implemented for Windows.");
+    return;
+  }
+
+  const normalized = browserName.toLowerCase();
+  const imageName = ["edge", "msedge", "microsoft-edge"].includes(normalized)
+    ? "msedge.exe"
+    : ["chrome", "google-chrome"].includes(normalized)
+      ? "chrome.exe"
+      : undefined;
+
+  if (!imageName) return;
+
+  console.log(`Closing existing ${imageName} processes before launching with CDP...`);
+  spawnSync("taskkill", ["/IM", imageName, "/F", "/T"], { stdio: "ignore" });
+}
+
 function launchExternalBrowser(browserName: string, cdpPort: string, jiraBaseUrl: string): void {
   const profileDir = resolveProfileDir();
   const command = resolveBrowserCommand(browserName);
@@ -212,6 +231,10 @@ async function openLoginSession(jiraBaseUrl: string, browserChannel?: string): P
   const cdpUrl = explicitCdpUrl || (launchBrowser ? `http://127.0.0.1:${cdpPort}` : undefined);
 
   if (launchBrowser) {
+    if (readBooleanFlag("close-existing-browser", "JIRA_CLOSE_EXISTING_BROWSER")) {
+      closeExistingBrowser(launchBrowser);
+    }
+
     launchExternalBrowser(launchBrowser, cdpPort, jiraBaseUrl);
   }
 
