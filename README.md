@@ -63,6 +63,19 @@ Run it from your project root. The login helper writes `JIRA_SESSION_TOKEN` to `
 
 If Microsoft SSO blocks the automated browser, start Edge yourself with remote debugging and let the helper connect to that real Edge session:
 
+```bash
+npx -y --package github:formonkey/jira-issue-context-mcp#main jira-issue-login \
+  --base-url=https://your-domain.atlassian.net \
+  --cookie-name=tenant.session.token \
+  --launch-browser=msedge \
+  --cdp-port=9222 \
+  --profile-dir=.auth/edge-sso-profile
+```
+
+This launches a real Edge process with a persistent project-local profile, connects to it over CDP, waits for you to finish Microsoft SSO, captures the Jira session cookie, and writes it to `.env`. The next time, it reuses `.auth/edge-sso-profile`.
+
+Advanced manual mode:
+
 ```powershell
 start msedge --remote-debugging-port=9222
 ```
@@ -76,7 +89,7 @@ npx -y --package github:formonkey/jira-issue-context-mcp#main jira-issue-login \
   --cdp-url=http://127.0.0.1:9222
 ```
 
-This mode is useful for corporate SSO because you sign in through your normal Edge profile instead of a Playwright-managed profile.
+Both CDP modes are useful for corporate SSO because the browser is launched as a normal installed browser instead of a Playwright-managed browser.
 
 ## Codex Project Config
 

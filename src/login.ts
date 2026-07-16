@@ -1,4 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { spawn } from "child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { platform } from "os";
 import { dirname, isAbsolute, resolve } from "path";
 import { fileURLToPath } from "url";
 import { chromium } from "playwright";
@@ -60,24 +62,124 @@ function resolveProfileDir(): string {
   return isAbsolute(configured) ? configured : resolve(WORK_DIR, configured);
 }
 
+function getCdpPort(cdpUrl?: string): string {
+  const configured = getArgValue("cdp-port") || readEnvValue("JIRA_CDP_PORT");
+  if (configured) return configured;
+
+  if (cdpUrl) {
+    try {
+      return new URL(cdpUrl).port || "9222";
+    } catch {
+      return "9222";
+    }
+  }
+
+  return "9222";
+}
+
+function resolveBrowserCommand(browserName: string): string {
+  const normalized = browserName.toLowerCase();
+
+  if (["edge", "msedge", "microsoft-edge"].includes(normalized)) {
+    if (platform() === "darwin") {
+      const edgePath = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
+      return existsSync(edgePath) ? edgePath : "microsoft-edge";
+    }
+
+    if (platform() === "linux") {
+      return "microsoft-edge";
+    }
+
+    return "msedge";
+  }
+
+  if (["chrome", "google-chrome"].includes(normalized)) {
+    if (platform() === "darwin") {
+      const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+      return existsSync(chromePath) ? chromePath : "google-chrome";
+    }
+
+    if (platform() === "linux") {
+      return "google-chrome";
+    }
+
+    return "chrome";
+  }
+
+  return browserName;
+}
+
+function launchExternalBrowser(browserName: string, cdpPort: string, jiraBaseUrl: string): void {
+  const profileDir = resolveProfileDir();
+  const command = resolveBrowserCommand(browserName);
+
+  mkdirSync(profileDir, { recursive: true });
+
+  const args = [
+    `--remote-debugging-port=${cdpPort}`,
+    `--user-data-dir=${profileDir}`,
+    "--no-first-run",
+    "--new-window",
+    jiraBaseUrl,
+  ];
+
+  console.log(`Launching ${browserName} with remote debugging on port ${cdpPort}`);
+  console.log(`Using persistent browser profile: ${profileDir}`);
+
+  const child = spawn(command, args, {
+    detached: true,
+    shell: platform() === "win32",
+    stdio: "ignore",
+  });
+
+  child.on("error", (error) => {
+    console.error(`Could not launch ${browserName}: ${error.message}`);
+  });
+
+  child.unref();
+}
+
+async function connectOverCdpWithRetry(cdpUrl: string, timeoutMs = 30_000): Promise<Browser> {
+  const startedAt = Date.now();
+  let lastError: Error | undefined;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      return await chromium.connectOverCDP(cdpUrl);
+    } catch (error) {
+      lastError = error as Error;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 1000));
+    }
+  }
+
+  throw new Error(`Could not connect to browser at ${cdpUrl}. ${lastError?.message || ""}`.trim());
+}
+
 type LoginSession = {
   context: BrowserContext;
   page: Page;
   cleanup: () => Promise<void>;
 };
 
-async function openLoginSession(browserChannel?: string): Promise<LoginSession> {
-  const cdpUrl = getArgValue("cdp-url") || readEnvValue("JIRA_CDP_URL");
+async function openLoginSession(jiraBaseUrl: string, browserChannel?: string): Promise<LoginSession> {
+  const launchBrowser = getArgValue("launch-browser") || readEnvValue("JIRA_LAUNCH_BROWSER");
+  const explicitCdpUrl = getArgValue("cdp-url") || readEnvValue("JIRA_CDP_URL");
+  const cdpPort = getCdpPort(explicitCdpUrl);
+  const cdpUrl = explicitCdpUrl || (launchBrowser ? `http://127.0.0.1:${cdpPort}` : undefined);
+
+  if (launchBrowser) {
+    launchExternalBrowser(launchBrowser, cdpPort, jiraBaseUrl);
+  }
 
   if (cdpUrl) {
     console.log(`Connecting to existing browser over CDP: ${cdpUrl}`);
 
     let browser: Browser;
     try {
-      browser = await chromium.connectOverCDP(cdpUrl);
+      browser = await connectOverCdpWithRetry(cdpUrl);
     } catch (error) {
       throw new Error(
-        `Could not connect to Edge at ${cdpUrl}. Start Edge with --remote-debugging-port first. ${
+        `Could not connect to browser at ${cdpUrl}. Start it with --remote-debugging-port first. ${
           (error as Error).message
         }`
       );
@@ -139,7 +241,7 @@ export async function interactiveLogin(): Promise<string> {
     `Complete SSO in the browser window if required. The ${cookieName} cookie will be saved to .env.`
   );
 
-  const { context, page, cleanup } = await openLoginSession(browserChannel);
+  const { context, page, cleanup } = await openLoginSession(jiraBaseUrl, browserChannel);
 
   const maxWaitMs = 5 * 60 * 1000;
   const pollIntervalMs = 2000;
