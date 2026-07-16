@@ -69,10 +69,10 @@ npx -y --package github:formonkey/jira-issue-context-mcp#main jira-issue-login \
   --cookie-name=tenant.session.token \
   --launch-browser=msedge \
   --cdp-port=9222 \
-  --profile-dir=.auth/edge-sso-profile
+  --default-profile=true
 ```
 
-This launches a real Edge process with a persistent project-local profile, connects to it over CDP, waits for you to finish Microsoft SSO, captures the Jira session cookie, and writes it to `.env`. The next time, it reuses `.auth/edge-sso-profile`.
+This launches a real Edge process with the installed browser's default profile, connects to it over CDP, waits for you to finish Microsoft SSO, captures the Jira session cookie, and writes it to `.env`.
 
 Advanced manual mode:
 

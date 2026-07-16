@@ -35,6 +35,15 @@ function readEnvValue(name: string): string | undefined {
   return undefined;
 }
 
+function readBooleanFlag(name: string, envName: string): boolean {
+  if (process.argv.includes(`--${name}`)) return true;
+
+  const rawValue = getArgValue(name) || readEnvValue(envName);
+  if (!rawValue) return false;
+
+  return ["1", "true", "yes", "on"].includes(rawValue.toLowerCase());
+}
+
 function updateEnvValue(name: string, value: string): void {
   let content = "";
   try {
@@ -136,21 +145,31 @@ function resolveBrowserCommand(browserName: string): string {
 function launchExternalBrowser(browserName: string, cdpPort: string, jiraBaseUrl: string): void {
   const profileDir = resolveProfileDir();
   const command = resolveBrowserCommand(browserName);
+  const useDefaultProfile = readBooleanFlag("default-profile", "JIRA_USE_DEFAULT_BROWSER_PROFILE");
 
-  mkdirSync(profileDir, { recursive: true });
+  if (!useDefaultProfile) {
+    mkdirSync(profileDir, { recursive: true });
+  }
 
   const args = [
     `--remote-debugging-port=${cdpPort}`,
     "--remote-debugging-address=127.0.0.1",
-    `--user-data-dir=${profileDir}`,
     "--no-first-run",
     "--new-window",
     jiraBaseUrl,
   ];
 
+  if (!useDefaultProfile) {
+    args.splice(2, 0, `--user-data-dir=${profileDir}`);
+  }
+
   console.log(`Launching ${browserName} with remote debugging on port ${cdpPort}`);
   console.log(`Browser executable: ${command}`);
-  console.log(`Using persistent browser profile: ${profileDir}`);
+  if (useDefaultProfile) {
+    console.log("Using the default installed browser profile.");
+  } else {
+    console.log(`Using persistent browser profile: ${profileDir}`);
+  }
 
   const child = spawn(command, args, {
     detached: true,
