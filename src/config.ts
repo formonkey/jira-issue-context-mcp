@@ -5,7 +5,10 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-dotenv.config({ path: resolve(__dirname, "..", ".env"), quiet: true });
+dotenv.config({
+  path: [resolve(process.cwd(), ".env"), resolve(__dirname, "..", ".env")],
+  quiet: true,
+});
 
 export interface Config {
   jiraBaseUrl: string;

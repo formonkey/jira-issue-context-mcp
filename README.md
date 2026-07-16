@@ -25,6 +25,8 @@ npm run build
 
 Set `JIRA_BASE_URL` plus one auth method.
 
+You can put these variables in the shell environment or in a `.env` file in the directory where the MCP command is started. The package also checks its own local `.env` as a fallback.
+
 Recommended for Atlassian Cloud:
 
 ```env
