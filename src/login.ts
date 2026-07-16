@@ -81,6 +81,18 @@ function resolveBrowserCommand(browserName: string): string {
   const normalized = browserName.toLowerCase();
 
   if (["edge", "msedge", "microsoft-edge"].includes(normalized)) {
+    if (platform() === "win32") {
+      const candidates = [
+        process.env["PROGRAMFILES(X86)"],
+        process.env.PROGRAMFILES,
+        process.env.LOCALAPPDATA,
+      ]
+        .filter((basePath): basePath is string => Boolean(basePath))
+        .map((basePath) => resolve(basePath, "Microsoft", "Edge", "Application", "msedge.exe"));
+
+      return candidates.find((candidate) => existsSync(candidate)) ?? "msedge.exe";
+    }
+
     if (platform() === "darwin") {
       const edgePath = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
       return existsSync(edgePath) ? edgePath : "microsoft-edge";
@@ -94,6 +106,18 @@ function resolveBrowserCommand(browserName: string): string {
   }
 
   if (["chrome", "google-chrome"].includes(normalized)) {
+    if (platform() === "win32") {
+      const candidates = [
+        process.env.PROGRAMFILES,
+        process.env["PROGRAMFILES(X86)"],
+        process.env.LOCALAPPDATA,
+      ]
+        .filter((basePath): basePath is string => Boolean(basePath))
+        .map((basePath) => resolve(basePath, "Google", "Chrome", "Application", "chrome.exe"));
+
+      return candidates.find((candidate) => existsSync(candidate)) ?? "chrome.exe";
+    }
+
     if (platform() === "darwin") {
       const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
       return existsSync(chromePath) ? chromePath : "google-chrome";
@@ -117,6 +141,7 @@ function launchExternalBrowser(browserName: string, cdpPort: string, jiraBaseUrl
 
   const args = [
     `--remote-debugging-port=${cdpPort}`,
+    "--remote-debugging-address=127.0.0.1",
     `--user-data-dir=${profileDir}`,
     "--no-first-run",
     "--new-window",
@@ -124,11 +149,11 @@ function launchExternalBrowser(browserName: string, cdpPort: string, jiraBaseUrl
   ];
 
   console.log(`Launching ${browserName} with remote debugging on port ${cdpPort}`);
+  console.log(`Browser executable: ${command}`);
   console.log(`Using persistent browser profile: ${profileDir}`);
 
   const child = spawn(command, args, {
     detached: true,
-    shell: platform() === "win32",
     stdio: "ignore",
   });
 
@@ -139,7 +164,7 @@ function launchExternalBrowser(browserName: string, cdpPort: string, jiraBaseUrl
   child.unref();
 }
 
-async function connectOverCdpWithRetry(cdpUrl: string, timeoutMs = 30_000): Promise<Browser> {
+async function connectOverCdpWithRetry(cdpUrl: string, timeoutMs = 60_000): Promise<Browser> {
   const startedAt = Date.now();
   let lastError: Error | undefined;
 
