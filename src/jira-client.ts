@@ -1,4 +1,4 @@
-import { Config } from "./config.js";
+import { AuthenticatedConfig } from "./config.js";
 
 export interface JiraUser {
   accountId: string;
@@ -68,7 +68,7 @@ export class JiraClient {
   private readonly authHeaders: Record<string, string>;
   private readonly timeoutMs: number;
 
-  constructor(config: Config) {
+  constructor(config: AuthenticatedConfig) {
     this.baseUrl = config.jiraBaseUrl.replace(/\/+$/, "");
     this.authHeaders = this.createAuthHeaders(config);
     this.timeoutMs = config.requestTimeoutMs;
@@ -325,7 +325,7 @@ export class JiraClient {
       .join("\n")}\n`;
   }
 
-  private createAuthHeaders(config: Config): Record<string, string> {
+  private createAuthHeaders(config: AuthenticatedConfig): Record<string, string> {
     if (config.auth.mode === "basic") {
       const token = Buffer.from(`${config.auth.email}:${config.auth.apiToken}`, "utf-8").toString(
         "base64"

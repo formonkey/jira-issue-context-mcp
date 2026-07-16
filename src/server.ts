@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { assertIssueKey, Config, loadConfig } from "./config.js";
+import { assertIssueKey, Config, loadAuthenticatedConfig, loadConfig } from "./config.js";
 import { JiraAttachment, JiraClient } from "./jira-client.js";
 
 type ToolContent =
@@ -10,7 +10,7 @@ type ToolContent =
 
 let config: Config;
 try {
-  config = loadConfig();
+  config = loadConfig({ requireAuth: false });
   if (!config.jiraBaseUrl) {
     throw new Error("No JIRA_BASE_URL configured.");
   }
@@ -18,8 +18,6 @@ try {
   console.error(`ERROR: ${(error as Error).message}`);
   process.exit(1);
 }
-
-const jira = new JiraClient(config);
 
 const server = new McpServer(
   {
@@ -62,10 +60,16 @@ server.registerTool(
   },
   async (args) => {
     try {
-      const issueKey = assertIssueKey(args.issueKey || config.issueKey);
+      const runtimeConfig = loadAuthenticatedConfig();
+      if (!runtimeConfig.jiraBaseUrl) {
+        throw new Error("No JIRA_BASE_URL configured.");
+      }
+
+      const jira = new JiraClient(runtimeConfig);
+      const issueKey = assertIssueKey(args.issueKey || runtimeConfig.issueKey);
       const includeComments = args.includeComments ?? true;
       const includeImages = args.includeImages ?? true;
-      const maxImageSizeMB = args.maxImageSizeMB ?? config.maxImageMB;
+      const maxImageSizeMB = args.maxImageSizeMB ?? runtimeConfig.maxImageMB;
 
       const issue = await jira.getIssue(issueKey);
       const comments = includeComments ? await jira.getAllComments(issueKey) : [];

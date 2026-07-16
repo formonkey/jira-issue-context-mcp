@@ -12,11 +12,15 @@ dotenv.config({
 
 export interface Config {
   jiraBaseUrl: string;
-  auth: AuthConfig;
+  auth?: AuthConfig;
   issueKey?: string;
   maxImageMB: number;
   requestTimeoutMs: number;
 }
+
+export type AuthenticatedConfig = Config & {
+  auth: AuthConfig;
+};
 
 export type AuthConfig =
   | {
@@ -45,19 +49,30 @@ function getNumber(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-export function loadConfig(): Config {
+export function loadConfig(options: { requireAuth?: boolean } = {}): Config {
   const jiraBaseUrl = getArgValue("base-url") || process.env.JIRA_BASE_URL || "";
 
   return {
     jiraBaseUrl,
-    auth: loadAuthConfig(),
+    auth: loadAuthConfig(options.requireAuth ?? true),
     issueKey: normalizeIssueKey(getArgValue("issue") || process.env.JIRA_ISSUE_KEY),
     maxImageMB: getNumber(process.env.JIRA_MAX_IMAGE_MB, 8),
     requestTimeoutMs: getNumber(process.env.JIRA_REQUEST_TIMEOUT_MS, 30000),
   };
 }
 
-function loadAuthConfig(): AuthConfig {
+export function loadAuthenticatedConfig(): AuthenticatedConfig {
+  const config = loadConfig({ requireAuth: true });
+  if (!config.auth) {
+    throw new Error(
+      "No Jira auth configured. Set JIRA_EMAIL + JIRA_API_TOKEN, JIRA_BEARER_TOKEN, or JIRA_SESSION_TOKEN."
+    );
+  }
+
+  return config as AuthenticatedConfig;
+}
+
+function loadAuthConfig(requireAuth: boolean): AuthConfig | undefined {
   const email = getArgValue("email") || process.env.JIRA_EMAIL;
   const apiToken = getArgValue("api-token") || process.env.JIRA_API_TOKEN;
   if (email && apiToken) {
@@ -83,6 +98,10 @@ function loadAuthConfig(): AuthConfig {
       cookieName: getArgValue("cookie-name") || process.env.JIRA_COOKIE_NAME || "tenant.session.token",
       sessionToken,
     };
+  }
+
+  if (!requireAuth) {
+    return undefined;
   }
 
   throw new Error(
