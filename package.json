@@ -1,0 +1,46 @@
+{
+  "name": "@formonkey/jira-issue-context-mcp",
+  "version": "1.0.0",
+  "description": "Read-only MCP server that returns title, description, comments, and image attachments for a Jira issue.",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "jira-issue-mcp": "dist/index.js",
+    "jira-issue-login": "dist/login-cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/index.js",
+    "login": "node dist/login-cli.js",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "mcp",
+    "jira",
+    "codex",
+    "issue-context"
+  ],
+  "author": "formonkey",
+  "license": "MIT",
+  "private": false,
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "dotenv": "^17.3.1",
+    "playwright": "^1.58.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.4.0",
+    "typescript": "^5.9.3"
+  }
+}
