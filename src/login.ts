@@ -65,11 +65,15 @@ export async function interactiveLogin(): Promise<string> {
     throw new Error("Set JIRA_BASE_URL before running the login helper.");
   }
   const cookieName = getArgValue("cookie-name") || readEnvValue("JIRA_COOKIE_NAME") || "tenant.session.token";
+  const browserChannel = getArgValue("browser-channel") || readEnvValue("JIRA_BROWSER_CHANNEL");
   const profileDir = resolveProfileDir();
 
   console.log("Jira Issue MCP - interactive login");
   console.log(`Opening ${jiraBaseUrl}`);
   console.log(`Using persistent browser profile: ${profileDir}`);
+  if (browserChannel) {
+    console.log(`Using installed browser channel: ${browserChannel}`);
+  }
   console.log(`Writing token to: ${ENV_PATH}`);
   console.log(
     `Complete SSO in the browser window if required. The ${cookieName} cookie will be saved to .env.`
@@ -79,6 +83,7 @@ export async function interactiveLogin(): Promise<string> {
 
   const context = await chromium.launchPersistentContext(profileDir, {
     headless: false,
+    channel: browserChannel,
     args: ["--disable-blink-features=AutomationControlled"],
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
