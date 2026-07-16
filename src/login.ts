@@ -265,21 +265,21 @@ async function openLoginSession(jiraBaseUrl: string, browserChannel?: string): P
     };
   }
 
-  const profileDir = resolveProfileDir();
-  console.log(`Using persistent browser profile: ${profileDir}`);
+  console.log("Using Playwright Chromium login flow.");
   if (browserChannel) {
     console.log(`Using installed browser channel: ${browserChannel}`);
   }
 
-  mkdirSync(profileDir, { recursive: true });
-
-  const context = await chromium.launchPersistentContext(profileDir, {
+  const browser = await chromium.launch({
     headless: false,
     channel: browserChannel,
     args: ["--disable-blink-features=AutomationControlled", "--start-maximized"],
+  });
+
+  const context = await browser.newContext({
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    viewport: null,
+    viewport: { width: 1280, height: 900 },
   });
 
   const page = await context.newPage();
@@ -288,7 +288,7 @@ async function openLoginSession(jiraBaseUrl: string, browserChannel?: string): P
     context,
     page,
     cleanup: async () => {
-      await context.close().catch(() => undefined);
+      await browser.close().catch(() => undefined);
     },
   };
 }
