@@ -56,10 +56,10 @@ For SSO environments where API tokens are not available, the login helper can ca
 npx -y --package github:formonkey/jira-issue-context-mcp#main jira-issue-login \
   --base-url=https://your-domain.atlassian.net \
   --cookie-name=tenant.session.token \
-  --browser-channel=chrome
+  --browser-channel=msedge
 ```
 
-Run it from your project root. The login helper writes `JIRA_SESSION_TOKEN` to `.env` in the current directory and uses a persistent Playwright profile at `.auth/browser-profile` by default. `--browser-channel=chrome` uses your installed Chrome instead of downloading Playwright's Chromium. You may need to complete SSO/MFA manually the first time; later runs reuse the browser session while it remains valid.
+Run it from your project root. The login helper writes `JIRA_SESSION_TOKEN` to `.env` in the current directory and uses a persistent Playwright profile at `.auth/browser-profile` by default. `--browser-channel=msedge` uses your installed Edge instead of downloading Playwright's Chromium. You may need to complete SSO/MFA manually the first time; later runs reuse the browser session while it remains valid.
 
 ## Codex Project Config
 
