@@ -243,7 +243,6 @@ async function saveStorageState(context: BrowserContext, storageStatePath: strin
 async function tryStoredLogin(
   jiraBaseUrl: string,
   cookieName: string,
-  browserChannel: string | undefined,
   storageStatePath: string
 ): Promise<string | undefined> {
   if (!existsSync(storageStatePath)) {
@@ -252,36 +251,35 @@ async function tryStoredLogin(
 
   console.log(`Trying stored Playwright auth state: ${storageStatePath}`);
 
-  const browser = await chromium.launch({
-    headless: true,
-    channel: browserChannel,
-    args: ["--disable-blink-features=AutomationControlled"],
-  });
-
   try {
-    const context = await browser.newContext({
-      storageState: storageStatePath,
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      viewport: { width: 1280, height: 900 },
-    });
-    const page = await context.newPage();
-    await page.goto(`${jiraBaseUrl}/rest/api/3/myself`, { waitUntil: "domcontentloaded" });
+    const storageState = JSON.parse(readFileSync(storageStatePath, "utf-8")) as {
+      cookies?: Array<{ name: string; value: string; domain?: string }>;
+    };
+    const jiraHost = new URL(jiraBaseUrl).hostname;
+    const token = storageState.cookies?.find((cookie) => {
+      if (cookie.name !== cookieName) return false;
+      const cookieDomain = (cookie.domain || "").replace(/^\./, "");
+      return !cookieDomain || jiraHost === cookieDomain || jiraHost.endsWith(`.${cookieDomain}`);
+    })?.value;
 
-    const body = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    if (!body.trim().startsWith("{")) {
+    if (!token) {
+      console.log(`Stored auth state exists, but ${cookieName} was not found.`);
+      return undefined;
+    }
+
+    const response = await fetch(`${jiraBaseUrl}/rest/api/3/myself`, {
+      headers: {
+        Accept: "application/json",
+        Cookie: `${cookieName}=${token}`,
+      },
+    });
+
+    if (!response.ok) {
       console.log("Stored auth state is not valid anymore.");
       return undefined;
     }
 
-    JSON.parse(body);
-
-    const cookies = await context.cookies();
-    const token = cookies.find((cookie) => cookie.name === cookieName)?.value;
-    if (!token) {
-      console.log(`Stored auth state verified, but ${cookieName} was not found.`);
-      return undefined;
-    }
+    await response.json();
 
     updateEnvValue("JIRA_BASE_URL", jiraBaseUrl);
     updateEnvValue("JIRA_COOKIE_NAME", cookieName);
@@ -292,8 +290,6 @@ async function tryStoredLogin(
   } catch (error) {
     console.log(`Stored auth state could not be reused: ${(error as Error).message}`);
     return undefined;
-  } finally {
-    await browser.close().catch(() => undefined);
   }
 }
 
@@ -347,13 +343,12 @@ async function openLoginSession(jiraBaseUrl: string, browserChannel?: string): P
   const browser = await chromium.launch({
     headless: false,
     channel: browserChannel,
-    args: ["--disable-blink-features=AutomationControlled", "--start-maximized"],
+    ignoreDefaultArgs: ["--enable-automation"],
+    args: ["--disable-blink-features=AutomationControlled", "--start-maximized", "--window-size=1600,1000"],
   });
 
   const context = await browser.newContext({
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    viewport: { width: 1280, height: 900 },
+    viewport: null,
   });
 
   const page = await context.newPage();
@@ -387,7 +382,7 @@ export async function interactiveLogin(): Promise<string> {
   );
 
   if (!forceLogin) {
-    const storedToken = await tryStoredLogin(jiraBaseUrl, cookieName, browserChannel, storageStatePath);
+    const storedToken = await tryStoredLogin(jiraBaseUrl, cookieName, storageStatePath);
     if (storedToken) {
       return storedToken;
     }
