@@ -56,10 +56,10 @@ For SSO environments where API tokens are not available, the login helper can ca
 npx -y --package github:formonkey/jira-issue-context-mcp#main jira-issue-login \
   --base-url=https://your-domain.atlassian.net \
   --cookie-name=tenant.session.token \
-  --browser-channel=msedge
+  --storage-state=.auth/jira-storage-state.json
 ```
 
-Run it from your project root. The login helper writes `JIRA_SESSION_TOKEN` to `.env` in the current directory and uses a persistent Playwright profile at `.auth/browser-profile` by default. `--browser-channel=msedge` uses your installed Edge instead of downloading Playwright's Chromium. You may need to complete SSO/MFA manually the first time; later runs reuse the browser session while it remains valid.
+Run it from your project root. The first successful run writes `JIRA_SESSION_TOKEN` to `.env` and saves Playwright auth state to `.auth/jira-storage-state.json`. Later runs try that stored auth state first, refresh `.env`, and only open the browser again if the state is missing or expired.
 
 If Microsoft SSO blocks the automated browser, start Edge yourself with remote debugging and let the helper connect to that real Edge session:
 

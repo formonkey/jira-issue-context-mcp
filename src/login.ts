@@ -71,6 +71,15 @@ function resolveProfileDir(): string {
   return isAbsolute(configured) ? configured : resolve(WORK_DIR, configured);
 }
 
+function resolveStorageStatePath(): string {
+  const configured =
+    getArgValue("storage-state") ||
+    readEnvValue("JIRA_STORAGE_STATE") ||
+    ".auth/jira-storage-state.json";
+
+  return isAbsolute(configured) ? configured : resolve(WORK_DIR, configured);
+}
+
 function getCdpPort(cdpUrl?: string): string {
   const configured = getArgValue("cdp-port") || readEnvValue("JIRA_CDP_PORT");
   if (configured) return configured;
@@ -222,7 +231,71 @@ type LoginSession = {
   context: BrowserContext;
   page: Page;
   cleanup: () => Promise<void>;
+  canSaveStorageState: boolean;
 };
+
+async function saveStorageState(context: BrowserContext, storageStatePath: string): Promise<void> {
+  mkdirSync(dirname(storageStatePath), { recursive: true });
+  await context.storageState({ path: storageStatePath });
+  console.log(`Playwright storage state saved to: ${storageStatePath}`);
+}
+
+async function tryStoredLogin(
+  jiraBaseUrl: string,
+  cookieName: string,
+  browserChannel: string | undefined,
+  storageStatePath: string
+): Promise<string | undefined> {
+  if (!existsSync(storageStatePath)) {
+    return undefined;
+  }
+
+  console.log(`Trying stored Playwright auth state: ${storageStatePath}`);
+
+  const browser = await chromium.launch({
+    headless: true,
+    channel: browserChannel,
+    args: ["--disable-blink-features=AutomationControlled"],
+  });
+
+  try {
+    const context = await browser.newContext({
+      storageState: storageStatePath,
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      viewport: { width: 1280, height: 900 },
+    });
+    const page = await context.newPage();
+    await page.goto(`${jiraBaseUrl}/rest/api/3/myself`, { waitUntil: "domcontentloaded" });
+
+    const body = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    if (!body.trim().startsWith("{")) {
+      console.log("Stored auth state is not valid anymore.");
+      return undefined;
+    }
+
+    JSON.parse(body);
+
+    const cookies = await context.cookies();
+    const token = cookies.find((cookie) => cookie.name === cookieName)?.value;
+    if (!token) {
+      console.log(`Stored auth state verified, but ${cookieName} was not found.`);
+      return undefined;
+    }
+
+    updateEnvValue("JIRA_BASE_URL", jiraBaseUrl);
+    updateEnvValue("JIRA_COOKIE_NAME", cookieName);
+    updateEnvValue("JIRA_SESSION_TOKEN", token);
+
+    console.log("Stored auth state reused. JIRA_SESSION_TOKEN saved to .env.");
+    return token;
+  } catch (error) {
+    console.log(`Stored auth state could not be reused: ${(error as Error).message}`);
+    return undefined;
+  } finally {
+    await browser.close().catch(() => undefined);
+  }
+}
 
 async function openLoginSession(jiraBaseUrl: string, browserChannel?: string): Promise<LoginSession> {
   const launchBrowser = getArgValue("launch-browser") || readEnvValue("JIRA_LAUNCH_BROWSER");
@@ -262,6 +335,7 @@ async function openLoginSession(jiraBaseUrl: string, browserChannel?: string): P
       cleanup: async () => {
         await browser.close().catch(() => undefined);
       },
+      canSaveStorageState: false,
     };
   }
 
@@ -290,6 +364,7 @@ async function openLoginSession(jiraBaseUrl: string, browserChannel?: string): P
     cleanup: async () => {
       await browser.close().catch(() => undefined);
     },
+    canSaveStorageState: true,
   };
 }
 
@@ -300,15 +375,25 @@ export async function interactiveLogin(): Promise<string> {
   }
   const cookieName = getArgValue("cookie-name") || readEnvValue("JIRA_COOKIE_NAME") || "tenant.session.token";
   const browserChannel = getArgValue("browser-channel") || readEnvValue("JIRA_BROWSER_CHANNEL");
+  const storageStatePath = resolveStorageStatePath();
+  const forceLogin = readBooleanFlag("force-login", "JIRA_FORCE_LOGIN");
 
   console.log("Jira Issue MCP - interactive login");
   console.log(`Opening ${jiraBaseUrl}`);
   console.log(`Writing token to: ${ENV_PATH}`);
+  console.log(`Storage state path: ${storageStatePath}`);
   console.log(
     `Complete SSO in the browser window if required. The ${cookieName} cookie will be saved to .env.`
   );
 
-  const { context, page, cleanup } = await openLoginSession(jiraBaseUrl, browserChannel);
+  if (!forceLogin) {
+    const storedToken = await tryStoredLogin(jiraBaseUrl, cookieName, browserChannel, storageStatePath);
+    if (storedToken) {
+      return storedToken;
+    }
+  }
+
+  const { context, page, cleanup, canSaveStorageState } = await openLoginSession(jiraBaseUrl, browserChannel);
 
   const maxWaitMs = 5 * 60 * 1000;
   const pollIntervalMs = 2000;
@@ -355,6 +440,9 @@ export async function interactiveLogin(): Promise<string> {
 
     const finalCookies = await context.cookies();
     token = finalCookies.find((cookie) => cookie.name === cookieName)?.value || token;
+    if (canSaveStorageState) {
+      await saveStorageState(context, storageStatePath);
+    }
   } finally {
     await cleanup();
   }
